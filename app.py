@@ -74,10 +74,10 @@ def recomendar(estudiante_id, alpha=0.5, n=5):
 # ---------------------------
 # INTERFAZ STREAMLIT
 # ---------------------------
-st.title("🎓 Recomendador de Cursos Híbrido")
+st.title("🎓 Recomendador de Cursos")
 
 estudiante = st.selectbox("Selecciona un estudiante", sorted(df['estudiante_id'].unique()))
-alpha = st.slider("Peso del filtrado colaborativo", 0.0, 1.0, 0.5)
+alpha = 0.5
 
 recs = recomendar(estudiante, alpha=alpha, n=5)
 df_rec = pd.DataFrame(recs)
