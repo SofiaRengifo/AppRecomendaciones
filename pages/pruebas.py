@@ -62,14 +62,15 @@ def recomendar_contenido(est_id, n=5):
         pred[row['curso_id']] = perfil.get(row['categoria'], 0)
     return sorted(pred, key=pred.get, reverse=True)[:n]
 
-def recomendar_hibrido(est_id, alpha=0.5, n=5):
+def recomendar_hibrido(est_id, alpha=0.8, n=5):
     colab = recomendar_colaborativo(est_id, n=10)
     cont = recomendar_contenido(est_id, n=10)
     puntuaciones = {}
-    for cid in set(colab + cont):
-        val_c = 1 if cid in colab else 0
-        val_t = 1 if cid in cont else 0
-        puntuaciones[cid] = alpha * val_c + (1 - alpha) * val_t
+    for i, cid in enumerate(colab):
+        puntuaciones[cid] = puntuaciones.get(cid, 0) + alpha * (10 - i)
+    for i, cid in enumerate(cont):
+        puntuaciones[cid] = puntuaciones.get(cid, 0) + (1 - alpha) * (10 - i)
+
     return sorted(puntuaciones, key=puntuaciones.get, reverse=True)[:n]
 
 # --- Comparación binaria (mejorada para MCC) ---
