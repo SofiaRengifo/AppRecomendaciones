@@ -1,96 +1,195 @@
+# app_recomendador.py
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-from collections import Counter
 from sklearn.metrics.pairwise import cosine_similarity
+from collections import Counter
+from sklearn.model_selection import train_test_split
 
-# Cargar datos
-df = pd.read_csv('valoraciones_cursos.csv')  # O tu archivo real
 
-cursos_info = {
-    101: {'nombre': 'Introducción a Python', 'categoria': 'Programación'},
-    102: {'nombre': 'Machine Learning Básico', 'categoria': 'Ciencia de Datos'},
-    103: {'nombre': 'Análisis de Datos con Pandas', 'categoria': 'Ciencia de Datos'},
-    104: {'nombre': 'Diseño UX/UI', 'categoria': 'Diseño'},
-    105: {'nombre': 'Desarrollo Web Full Stack', 'categoria': 'Programación'},
-    106: {'nombre': 'Blockchain Fundamentals', 'categoria': 'Tecnología'},
-    107: {'nombre': 'Marketing Digital', 'categoria': 'Negocios'},
-    108: {'nombre': 'SQL Avanzado', 'categoria': 'Bases de Datos'}
-}
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import io
 
-# Procesamiento
-cursos_df = pd.DataFrame.from_dict(cursos_info, orient='index')
-cursos_df['curso_id'] = cursos_df.index
-cursos_df.reset_index(drop=True, inplace=True)
+# Cargar CSV
+df_full = pd.read_csv("valoraciones_cursos_simulado.csv")
 
-matriz = df.pivot_table(index='estudiante_id', columns='curso_id', values='valoracion')
+# Separar train/test por estudiante
+def dividir_train_test(df, test_size=0.2, min_ratings=3):
+    train_list, test_list = [], []
+    for user_id, group in df.groupby('estudiante_id'):
+        if len(group) >= min_ratings:
+            test_sample = group.sample(frac=test_size, random_state=42)
+            train_sample = group.drop(test_sample.index)
+            test_list.append(test_sample)
+            train_list.append(train_sample)
+        else:
+            train_list.append(group)
+    return pd.concat(train_list).reset_index(drop=True), pd.concat(test_list).reset_index(drop=True)
+
+df_train, df_test = dividir_train_test(df_full)
+
+# Crear cursos_info (opcional)
+cursos_info = df_full[['curso_id', 'nombre_curso']].drop_duplicates().set_index('curso_id').to_dict('index')
+
+# Matrices
+matriz = df_train.pivot_table(index='estudiante_id', columns='curso_id', values='valoracion')
 media_estudiante = matriz.mean(axis=1)
 matriz_normalizada = matriz.sub(media_estudiante, axis=0).fillna(0)
-
 similitud = cosine_similarity(matriz_normalizada)
 sim_df = pd.DataFrame(similitud, index=matriz.index, columns=matriz.index)
 
-# Funciones de recomendación
-def recomendar(estudiante_id, alpha=0.5, n=5):
-    similares = sim_df[estudiante_id].sort_values(ascending=False)[1:6]
-    cursos_tomados = matriz.loc[estudiante_id]
-    cursos_no_tomados = cursos_tomados[cursos_tomados.isna()].index
-
-    pred_colab = {}
-    for curso_id in cursos_no_tomados:
-        num, den = 0, 0
-        for otro_est, sim in similares.items():
-            if not np.isnan(matriz.loc[otro_est, curso_id]):
-                val = matriz.loc[otro_est, curso_id] - media_estudiante[otro_est]
-                num += sim * val
-                den += abs(sim)
-        if den != 0:
-            pred_colab[curso_id] = media_estudiante[estudiante_id] + num / den
-
-    cursos_df_no_tomados = cursos_df[~cursos_df['curso_id'].isin(cursos_tomados.dropna().index)]
-    perfil = Counter()
-    for _, row in df[df['estudiante_id'] == estudiante_id].iterrows():
-        cat = cursos_info.get(row['curso_id'], {}).get('categoria', 'General')
-        perfil.update([cat] * row['valoracion'])
-
-    pred_cont = {row['curso_id']: perfil.get(row['categoria'], 0) for _, row in cursos_df_no_tomados.iterrows()}
+# Recomendadores
+def recomendar_colaborativo(est_id, n=5):
+    if est_id not in matriz.index:
+        top_cursos = df_train.groupby('curso_id')['valoracion'].mean().sort_values(ascending=False).index.tolist()
+        return [{'Curso': cursos_info[cid]['nombre_curso'], 'Score': 0, 'Colaborativo': 0, 'Contenido': 0} for cid in top_cursos[:n]]
     
-    cursos_combinados = set(pred_colab.keys()).union(pred_cont.keys())
+    similares = sim_df[est_id].sort_values(ascending=False)[1:6]
+    cursos_tomados = matriz.loc[est_id]
+    cursos_no_tomados = cursos_tomados[cursos_tomados.isna()].index
+    pred = {}
+    for c in cursos_no_tomados:
+        num = sum(sim * (matriz.loc[otro, c] - media_estudiante[otro]) for otro, sim in similares.items() if not np.isnan(matriz.loc[otro, c]))
+        den = sum(abs(sim) for otro, sim in similares.items() if not np.isnan(matriz.loc[otro, c]))
+        if den != 0:
+            pred[c] = media_estudiante[est_id] + num / den
+    if not pred:
+        top_cursos = df_train.groupby('curso_id')['valoracion'].mean().sort_values(ascending=False).index.tolist()
+        return [{'Curso': cursos_info[cid]['nombre_curso'], 'Score': 0, 'Colaborativo': 0, 'Contenido': 0} for cid in top_cursos[:n]]
+    
     recomendaciones = []
-    for curso_id in cursos_combinados:
-        val_colab = pred_colab.get(curso_id, 0)
-        val_cont = pred_cont.get(curso_id, 0)
-        score = alpha * val_colab + (1 - alpha) * val_cont
-        info = cursos_info.get(curso_id, {})
+    for cid, score in sorted(pred.items(), key=lambda x: x[1], reverse=True)[:n]:
         recomendaciones.append({
-            'Curso': info.get('nombre', f'Curso {curso_id}'),
-            'Categoría': info.get('categoria', 'General'),
+            'Curso': cursos_info[cid]['nombre_curso'],
             'Score': round(score, 2),
-            'Colaborativo': round(val_colab, 2),
-            'Contenido': val_cont
+            'Colaborativo': round(score, 2),
+            'Contenido': 0
         })
-    return sorted(recomendaciones, key=lambda x: x['Score'], reverse=True)[:n]
+    return recomendaciones
 
-# ---------------------------
-# INTERFAZ STREAMLIT
-# ---------------------------
+
+
+def recomendar_contenido(est_id, n=5):
+    perfil = Counter()
+
+    # Obtener las valoraciones del estudiante en el dataset de entrenamiento
+    valoraciones = df_train[df_train['estudiante_id'] == est_id]
+
+    # Construir el perfil de intereses basado en la categoría del curso
+    for _, row in valoraciones.iterrows():
+        categoria = row['categoria']
+        valoracion = row['valoracion']
+        perfil.update([categoria] * valoracion)
+
+    # Obtener cursos que aún no ha tomado
+    cursos_tomados = set(valoraciones['curso_id'])
+    cursos_no_tomados = df_train[~df_train['curso_id'].isin(cursos_tomados)][['curso_id', 'nombre_curso', 'categoria']].drop_duplicates()
+
+    pred = {}
+    for _, row in cursos_no_tomados.iterrows():
+        score = perfil.get(row['categoria'], 0)
+        pred[row['curso_id']] = {
+            'nombre': row['nombre_curso'],
+            'categoria': row['categoria'],
+            'score': score
+        }
+
+    # Formatear resultados
+    recomendaciones = []
+    for cid, datos in sorted(pred.items(), key=lambda x: x[1]['score'], reverse=True)[:n]:
+        recomendaciones.append({
+            'Curso': datos['nombre'],
+            'Categoría': datos['categoria'],
+            'Score': round(datos['score'], 2),
+            'Colaborativo': 0,
+            'Contenido': round(datos['score'], 2)
+        })
+
+    return recomendaciones
+
+def recomendar_hibrido(est_id, alpha=0.5, n=5):
+    colab = recomendar_colaborativo(est_id, n=10)
+    cont = recomendar_contenido(est_id, n=10)
+    index_colab = {c['Curso']: c for c in colab}
+    index_cont = {c['Curso']: c for c in cont}
+    all_ids = set(index_colab) | set(index_cont)
+    resultados = []
+    for nombre in all_ids:
+        val_c = index_colab.get(nombre, {}).get('Score', 0)
+        val_t = index_cont.get(nombre, {}).get('Score', 0)
+        score = alpha * val_c + (1 - alpha) * val_t
+        resultados.append({
+            'Curso': nombre,
+            'Score': round(score, 2),
+            'Colaborativo': round(val_c, 2),
+            'Contenido': round(val_t, 2)
+        })
+    return sorted(resultados, key=lambda x: x['Score'], reverse=True)[:n]
+
+def formatear(pred_dict, estudiante_id, colaborativo=False, contenido=False):
+    recomendaciones = []
+    for cid, score in sorted(pred_dict.items(), key=lambda x: x[1], reverse=True):
+        nombre = cursos_info.get(cid, {}).get('nombre_curso', f'Curso {cid}')
+        recomendaciones.append({
+            'Curso': nombre,
+            'Score': round(score, 2),
+            'Colaborativo': round(score, 2) if colaborativo else 0,
+            'Contenido': round(score, 2) if contenido else 0
+        })
+    return recomendaciones[:5]
+
+
+def generar_pdf_recomendaciones(df, estudiante_id):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, height - 50, f"Recomendaciones para el Estudiante {estudiante_id}")
+
+    c.setFont("Helvetica", 10)
+    y = height - 80
+    for i, row in df.iterrows():
+        texto = f"{i+1}. {row['Curso']} | Score: {row['Score']} | Colaborativo: {row['Colaborativo']} | Contenido: {row['Contenido']}"
+        c.drawString(50, y, texto)
+        y -= 15
+        if y < 50:
+            c.showPage()
+            y = height - 50
+
+    c.save()
+    buffer.seek(0)
+    return buffer
+
+# --- STREAMLIT ---
 st.title("🎓 Recomendador de Cursos")
 
-estudiante = st.selectbox("Selecciona un estudiante", sorted(df['estudiante_id'].unique()))
-alpha = 0.5
+estudiante = st.selectbox("Selecciona un estudiante", sorted(df_train['estudiante_id'].unique()))
+modelo = st.radio("Modelo de recomendación", ['Híbrido', 'Colaborativo', 'Contenido'])
 
-recs = recomendar(estudiante, alpha=alpha, n=5)
-df_rec = pd.DataFrame(recs)
+if modelo == 'Híbrido':
+    alpha = st.slider("Peso del modelo colaborativo (α)", 0.0, 1.0, 0.5)
+    recs = recomendar_hibrido(estudiante, alpha=alpha)
+elif modelo == 'Colaborativo':
+    recs = recomendar_colaborativo(estudiante)
+else:
+    recs = recomendar_contenido(estudiante)
 
-st.subheader("📋 Recomendaciones")
-st.dataframe(df_rec)
+df_recs = pd.DataFrame(recs)
+st.dataframe(df_recs)
 
-st.bar_chart(df_rec.set_index("Curso")["Score"])
+st.bar_chart(df_recs.set_index("Curso")["Score"])
 
-# Descargar como CSV
+# Botón para descargar recomendaciones como PDF
+pdf_buffer = generar_pdf_recomendaciones(df_recs, estudiante)
+
+st.markdown("📢 _Se ha utilizado el 80% de los datos para entrenamiento y el 20% para test._")
+
 st.download_button(
-    label="💾 Descargar recomendaciones",
-    data=df_rec.to_csv(index=False),
-    file_name=f'recomendaciones_estudiante_{estudiante}.csv',
-    mime='text/csv'
+    label="📄 Descargar PDF de Recomendaciones",
+    data=pdf_buffer,
+    file_name=f"recomendaciones_estudiante_{estudiante}.pdf",
+    mime="application/pdf"
 )
