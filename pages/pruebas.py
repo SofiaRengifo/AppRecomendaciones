@@ -9,6 +9,10 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import io
 
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+
 # --- Cargar datos ---
 df_full = pd.read_csv("valoraciones_cursos_simulado.csv")
 
@@ -107,6 +111,27 @@ st.subheader("✅ Coeficiente de Matthews (MCC)")
 st.write(f"📘 Modelo Colaborativo: {mcc1:.4f}")
 st.write(f"📗 Modelo Basado en Contenido: {mcc2:.4f}")
 st.write(f"📙 Modelo Híbrido: {mcc3:.4f}")
+
+# --- Matrices de confusión ---
+st.subheader("🧮 Matrices de Confusión por Modelo")
+
+labels = ['No Tomado', 'Tomado']
+
+def mostrar_matriz_confusion(cm, titulo):
+    fig, ax = plt.subplots()
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels, ax=ax)
+    ax.set_xlabel('Predicción')
+    ax.set_ylabel('Valor Real')
+    ax.set_title(titulo)
+    st.pyplot(fig)
+
+cm_colab = confusion_matrix(y_true, y_pred1)
+cm_contenido = confusion_matrix(y_true, y_pred2)
+cm_hibrido = confusion_matrix(y_true, y_pred3)
+
+mostrar_matriz_confusion(cm_colab, "Matriz de Confusión - Colaborativo")
+mostrar_matriz_confusion(cm_contenido, "Matriz de Confusión - Contenido")
+mostrar_matriz_confusion(cm_hibrido, "Matriz de Confusión - Híbrido")
 
 # --- Prueba de McNemar ---
 def mcnemar_test(pred1, pred2):

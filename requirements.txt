@@ -4,3 +4,5 @@ numpy==1.26.4
 pandas==2.2.1
 reportlab==3.6.12
 statsmodels==0.14.1
+seaborn==0.13.2
+matplotlib==3.8.4
