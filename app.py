@@ -13,7 +13,7 @@ from reportlab.pdfgen import canvas
 import io
 
 # Cargar CSV
-df_full = pd.read_csv("valoraciones_cursos_simulado.csv")
+df_full = pd.read_csv("valoraciones_cursos.csv")
 
 # Separar train/test por estudiante
 def dividir_train_test(df, test_size=0.2, min_ratings=3):
@@ -81,7 +81,11 @@ def recomendar_contenido(est_id, n=5):
     for _, row in valoraciones.iterrows():
         categoria = row['categoria']
         valoracion = row['valoracion']
-        perfil.update([categoria] * valoracion)
+        if categoria in perfil:
+            perfil[categoria] += valoracion
+        else:
+            perfil[categoria] = valoracion
+
 
     # Obtener cursos que aún no ha tomado
     cursos_tomados = set(valoraciones['curso_id'])

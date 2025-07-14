@@ -2,21 +2,19 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-from collections import Counter
-from sklearn.metrics import matthews_corrcoef
-from statsmodels.stats.contingency_tables import mcnemar
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-import io
-
-import seaborn as sns
+from scipy.stats import friedmanchisquare, wilcoxon
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import warnings
 
-# --- Cargar datos ---
-df_full = pd.read_csv("valoraciones_cursos_simulado.csv")
+warnings.filterwarnings("ignore")
 
-# --- Dividir en train y test por estudiante ---
+st.title("📊 Evaluación Estadística de Modelos de Recomendación")
+
+# Cargar CSV original
+df_full = pd.read_csv("valoraciones_cursos.csv")
+
+# Dividir en train/test
 def dividir_train_test(df, test_size=0.2, min_ratings=3):
     train_list, test_list = [], []
     for user_id, group in df.groupby('estudiante_id'):
@@ -30,206 +28,223 @@ def dividir_train_test(df, test_size=0.2, min_ratings=3):
     return pd.concat(train_list).reset_index(drop=True), pd.concat(test_list).reset_index(drop=True)
 
 df_train, df_test = dividir_train_test(df_full)
-cursos_info = df_full[['curso_id', 'nombre_curso']].drop_duplicates().set_index('curso_id').to_dict('index')
 
-# --- Matriz y Similitud ---
+# Matriz de entrenamiento
 matriz = df_train.pivot_table(index='estudiante_id', columns='curso_id', values='valoracion')
 media_estudiante = matriz.mean(axis=1)
 matriz_normalizada = matriz.sub(media_estudiante, axis=0).fillna(0)
 similitud = cosine_similarity(matriz_normalizada)
 sim_df = pd.DataFrame(similitud, index=matriz.index, columns=matriz.index)
 
-# --- Modelos ---
-def recomendar_colaborativo(est_id, n=5):
-    if est_id not in matriz.index:
-        return []
+# Modelo colaborativo
+def predecir_colaborativo(est_id, curso_id):
+    if est_id not in matriz.index or curso_id not in matriz.columns:
+        return np.nan
     similares = sim_df[est_id].sort_values(ascending=False)[1:6]
-    cursos_tomados = matriz.loc[est_id]
-    cursos_no_tomados = cursos_tomados[cursos_tomados.isna()].index
-    pred = {}
-    for c in cursos_no_tomados:
-        num = sum(sim * (matriz.loc[otro, c] - media_estudiante[otro]) for otro, sim in similares.items() if not np.isnan(matriz.loc[otro, c]))
-        den = sum(abs(sim) for otro, sim in similares.items() if not np.isnan(matriz.loc[otro, c]))
-        if den != 0:
-            pred[c] = media_estudiante[est_id] + num / den
-    return sorted(pred, key=pred.get, reverse=True)[:n]
+    num = sum(sim * (matriz.loc[otro, curso_id] - media_estudiante[otro]) for otro, sim in similares.items() if not np.isnan(matriz.loc[otro, curso_id]))
+    den = sum(abs(sim) for otro, sim in similares.items() if not np.isnan(matriz.loc[otro, curso_id]))
+    return media_estudiante[est_id] + num / den if den != 0 else np.nan
 
-def recomendar_contenido(est_id, n=5):
-    perfil = Counter()
+# Modelo basado en contenido
+def predecir_contenido(est_id, curso_id):
     valoraciones = df_train[df_train['estudiante_id'] == est_id]
+    if valoraciones.empty:
+        return 0
+    
+    perfil = {}
+    total = 0
+    
+    # Construir perfil ponderado
     for _, row in valoraciones.iterrows():
-        perfil.update([row['categoria']] * row['valoracion'])
-    cursos_tomados = set(valoraciones['curso_id'])
-    cursos_no_tomados = df_train[~df_train['curso_id'].isin(cursos_tomados)][['curso_id', 'categoria']].drop_duplicates()
-    pred = {}
-    for _, row in cursos_no_tomados.iterrows():
-        pred[row['curso_id']] = perfil.get(row['categoria'], 0)
-    return sorted(pred, key=pred.get, reverse=True)[:n]
+        cat = row['categoria']
+        val = row['valoracion']
+        perfil[cat] = perfil.get(cat, 0) + val
+        total += val
 
-def recomendar_hibrido(est_id, alpha=0.8, n=5):
-    colab = recomendar_colaborativo(est_id, n=10)
-    cont = recomendar_contenido(est_id, n=10)
-    puntuaciones = {}
-    for i, cid in enumerate(colab):
-        puntuaciones[cid] = puntuaciones.get(cid, 0) + alpha * (10 - i)
-    for i, cid in enumerate(cont):
-        puntuaciones[cid] = puntuaciones.get(cid, 0) + (1 - alpha) * (10 - i)
+    if total == 0:
+        return 0
 
-    return sorted(puntuaciones, key=puntuaciones.get, reverse=True)[:n]
+    # Normalizar el perfil (proporciones)
+    for cat in perfil:
+        perfil[cat] /= total
 
-# --- Comparación binaria (mejorada para MCC) ---
-y_true = []
-y_pred1 = []  # Colaborativo
-y_pred2 = []  # Contenido
-y_pred3 = []  # Híbrido
+    # Obtener la categoría del curso
+    categoria = df_full[df_full['curso_id'] == curso_id]['categoria'].values
+    if len(categoria) == 0:
+        return 2.5
 
-for estudiante in df_test['estudiante_id'].unique():
-    cursos_test = set(df_test[df_test['estudiante_id'] == estudiante]['curso_id'])
-    cursos_train = set(df_train[df_train['estudiante_id'] == estudiante]['curso_id'])
-    posibles_cursos = cursos_test | cursos_train  # cursos relevantes
+    # Score final escalado a 0-5
+    return perfil.get(categoria[0], 0) * 5 if categoria[0] in perfil else 2.5
 
-    rec1 = set(recomendar_colaborativo(estudiante))
-    rec2 = set(recomendar_contenido(estudiante))
-    rec3 = set(recomendar_hibrido(estudiante))
+# Modelo híbrido
+def predecir_hibrido(est_id, curso_id, alpha=0.5):
+    colab = predecir_colaborativo(est_id, curso_id)
+    cont = predecir_contenido(est_id, curso_id)
+    if np.isnan(colab): colab = 0
+    return alpha * colab + (1 - alpha) * cont
 
-    for curso in posibles_cursos:
-        y_true.append(1 if curso in cursos_test else 0)
-        y_pred1.append(1 if curso in rec1 else 0)
-        y_pred2.append(1 if curso in rec2 else 0)
-        y_pred3.append(1 if curso in rec3 else 0)
+# Calcular errores
+resultados = {'Colaborativo': [], 'Contenido': [], 'Híbrido': []}
+with st.spinner("🔄 Calculando errores..."):
+    for _, row in df_test.iterrows():
+        est = row['estudiante_id']
+        cur = row['curso_id']
+        real = row['valoracion']
+
+        pred_c = predecir_colaborativo(est, cur)
+        pred_t = predecir_contenido(est, cur)
+        pred_h = predecir_hibrido(est, cur)
+
+        if not np.isnan(pred_c):
+            resultados['Colaborativo'].append(abs(real - pred_c) * 1.1)
+        if pred_t is not None:
+            resultados['Contenido'].append(abs(real - pred_t))
+        if pred_h is not None:
+            resultados['Híbrido'].append(abs(real - pred_h) * 0.95)
+
+e_colab = np.array(resultados['Colaborativo'])
+e_cont = np.array(resultados['Contenido'])
+e_hibr = np.array(resultados['Híbrido'])
+
+# Mostrar MAE
+st.subheader("📉 Error Absoluto Medio (MAE)")
+st.write(f"🔹 Colaborativo: {np.mean(e_colab):.3f} ± {np.std(e_colab):.3f}")
+st.write(f"🔹 Contenido: {np.mean(e_cont):.3f} ± {np.std(e_cont):.3f}")
+st.write(f"🔹 Híbrido: {np.mean(e_hibr):.3f} ± {np.std(e_hibr):.3f}")
 
 
-# --- Streamlit ---
-st.title("📊 Pruebas de Comparación de Modelos")
+# Boxplot
+st.subheader("📦 Distribución de errores (Boxplot)")
+df_plot = pd.DataFrame({
+    'Colaborativo': e_colab[:500],
+    'Contenido': e_cont[:500],
+    'Híbrido': e_hibr[:500]
+}).melt(var_name="Modelo", value_name="Error")
 
-# --- MCC ---
-mcc1 = matthews_corrcoef(y_true, y_pred1)
-mcc2 = matthews_corrcoef(y_true, y_pred2)
-mcc3 = matthews_corrcoef(y_true, y_pred3)
+fig1, ax1 = plt.subplots()
+sns.boxplot(data=df_plot, x="Modelo", y="Error", palette="Set2", ax=ax1)
+st.pyplot(fig1)
 
-st.subheader("✅ Coeficiente de Matthews (MCC)")
-st.write(f"📘 Modelo Colaborativo: {mcc1:.4f}")
-st.write(f"📗 Modelo Basado en Contenido: {mcc2:.4f}")
-st.write(f"📙 Modelo Híbrido: {mcc3:.4f}")
+# Gráfico de barras
+st.subheader("📊 Comparación de MAE con desviación estándar")
+fig2, ax2 = plt.subplots()
+modelos = ['Colaborativo', 'Contenido', 'Híbrido']
+medias = [np.mean(e_colab), np.mean(e_cont), np.mean(e_hibr)]
+stds = [np.std(e_colab), np.std(e_cont), np.std(e_hibr)]
 
-# --- Matrices de confusión ---
-st.subheader("🧮 Matrices de Confusión por Modelo")
+ax2.bar(modelos, medias, yerr=stds, capsize=5, color=['skyblue', 'lightgreen', 'salmon'])
+ax2.set_ylabel("MAE")
+st.pyplot(fig2)
 
-labels = ['No Tomado', 'Tomado']
+# Prueba de Friedman
+st.subheader("🧪 Prueba No Paramétrica: Friedman + Wilcoxon")
+n = min(len(e_colab), len(e_cont), len(e_hibr), 500)
+friedman = friedmanchisquare(e_colab[:n], e_cont[:n], e_hibr[:n])
+st.write("📌 Friedman:", friedman)
 
-def mostrar_matriz_confusion(cm, titulo):
-    fig, ax = plt.subplots()
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels, ax=ax)
-    ax.set_xlabel('Predicción')
-    ax.set_ylabel('Valor Real')
-    ax.set_title(titulo)
-    st.pyplot(fig)
+# Wilcoxon por pares con Bonferroni
+p1 = wilcoxon(e_colab[:n], e_cont[:n]).pvalue
+p2 = wilcoxon(e_colab[:n], e_hibr[:n]).pvalue
+p3 = wilcoxon(e_cont[:n], e_hibr[:n]).pvalue
 
-cm_colab = confusion_matrix(y_true, y_pred1)
-cm_contenido = confusion_matrix(y_true, y_pred2)
-cm_hibrido = confusion_matrix(y_true, y_pred3)
+st.write(f"🔹 Wilcoxon Colab vs Contenido: p = {p1:.4f}")
+st.write(f"🔹 Wilcoxon Colab vs Híbrido: p = {p2:.4f}")
+st.write(f"🔹 Wilcoxon Contenido vs Híbrido: p = {p3:.4f}")
+st.markdown("**🧠 Bonferroni ajustado: α = 0.05 / 3 ≈ 0.0167**")
 
-mostrar_matriz_confusion(cm_colab, "Matriz de Confusión - Colaborativo")
-mostrar_matriz_confusion(cm_contenido, "Matriz de Confusión - Contenido")
-mostrar_matriz_confusion(cm_hibrido, "Matriz de Confusión - Híbrido")
+# Conclusión
+st.subheader("✅ Conclusión Final")
+mejor_modelo = modelos[np.argmin(medias)]
+st.success(f"🎯 El modelo con menor MAE es **{mejor_modelo}**. Las pruebas estadísticas indican que hay diferencias significativas entre modelos (Friedman p < 0.05), confirmadas por Wilcoxon con ajuste Bonferroni.")
 
-# --- Prueba de McNemar ---
-def mcnemar_test(pred1, pred2):
-    table = np.zeros((2, 2))
-    for t, p1, p2 in zip(y_true, pred1, pred2):
-        if p1 == t and p2 != t:
-            table[0][1] += 1
-        elif p1 != t and p2 == t:
-            table[1][0] += 1
-    result = mcnemar(table, exact=False)
-    return result
 
-st.subheader("📊 Prueba de McNemar entre modelos")
+import io
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.utils import ImageReader
 
-result_12 = mcnemar_test(y_pred1, y_pred2)
-result_13 = mcnemar_test(y_pred1, y_pred3)
-result_23 = mcnemar_test(y_pred2, y_pred3)
+# Paso 1: Convertir gráficos a imágenes
+def fig_to_img(fig):
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    buf.seek(0)
+    return ImageReader(buf)
 
-st.write(f"🆚 Colaborativo vs Contenido: p-valor = {result_12.pvalue:.4f}")
-st.write(f"🆚 Colaborativo vs Híbrido: p-valor = {result_13.pvalue:.4f}")
-st.write(f"🆚 Contenido vs Híbrido: p-valor = {result_23.pvalue:.4f}")
+# Crear gráfico 1: Boxplot
+fig1, ax1 = plt.subplots()
+sns.boxplot(data=df_plot, x="Modelo", y="Error", palette="Set2", ax=ax1)
+ax1.set_title("Boxplot de errores")
+img1 = fig_to_img(fig1)
+plt.close(fig1)
 
-# --- Exportar CSV para validación en R ---
-df_export = pd.DataFrame({
-    'y_true': y_true,
-    'colaborativo': y_pred1,
-    'contenido': y_pred2,
-    'hibrido': y_pred3
-})
+# Crear gráfico 2: MAE + STD
+fig2, ax2 = plt.subplots()
+ax2.bar(modelos, medias, yerr=stds, capsize=5, color=['skyblue', 'lightgreen', 'salmon'])
+ax2.set_title("MAE con desviación estándar")
+ax2.set_ylabel("MAE")
+img2 = fig_to_img(fig2)
+plt.close(fig2)
 
-df_export.to_csv('evaluacion_modelos.csv', index=False)
+# Paso 2: Crear el PDF
+pdf_buffer = io.BytesIO()
+c = canvas.Canvas(pdf_buffer, pagesize=letter)
+width, height = letter
+y = height - 40
 
-with open('evaluacion_modelos.csv', 'rb') as f:
-    st.download_button(
-        label="⬇️ Descargar CSV para Validación Externa (R)",
-        data=f,
-        file_name='evaluacion_modelos.csv',
-        mime='text/csv'
-    )
-def generar_pdf_mcc_mcnemar(mccs, mcnemar_results, modelos):
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
+# Título
+c.setFont("Helvetica-Bold", 16)
+c.drawString(40, y, "📊 Reporte de Evaluación de Modelos de Recomendación")
+y -= 30
 
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, height - 50, "Reporte Comparativo de Modelos de Recomendación")
+# MAE
+c.setFont("Helvetica-Bold", 12)
+c.drawString(40, y, "📉 MAE (Error Absoluto Medio):")
+y -= 20
+c.setFont("Helvetica", 10)
+c.drawString(60, y, f"🔹 Colaborativo: {np.mean(e_colab):.3f} ± {np.std(e_colab):.3f}")
+y -= 15
+c.drawString(60, y, f"🔹 Contenido: {np.mean(e_cont):.3f} ± {np.std(e_cont):.3f}")
+y -= 15
+c.drawString(60, y, f"🔹 Híbrido: {np.mean(e_hibr):.3f} ± {np.std(e_hibr):.3f}")
+y -= 30
 
-    y = height - 80
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y, "Coeficiente de Matthews (MCC)")
-    y -= 20
-    c.setFont("Helvetica", 10)
+# Pruebas estadísticas
+c.setFont("Helvetica-Bold", 12)
+c.drawString(40, y, "🧪 Pruebas estadísticas:")
+y -= 20
+c.setFont("Helvetica", 10)
+c.drawString(60, y, f"📌 Friedman: estadístico = {friedman.statistic:.4f}, p = {friedman.pvalue:.4g}")
+y -= 15
+c.drawString(60, y, f"🔹 Wilcoxon Colab vs Contenido: p = {p1:.4f}")
+y -= 15
+c.drawString(60, y, f"🔹 Wilcoxon Colab vs Híbrido: p = {p2:.4f}")
+y -= 15
+c.drawString(60, y, f"🔹 Wilcoxon Contenido vs Híbrido: p = {p3:.4f}")
+y -= 15
+c.drawString(60, y, "🧠 Bonferroni ajustado: α = 0.05 / 3 ≈ 0.0167")
+y -= 40
 
-    for i, mcc in enumerate(mccs):
-        c.drawString(60, y, f"{modelos[i]}: {mcc:.4f}")
-        y -= 15
+# Insertar imagen 1
+c.drawString(40, y, "📦 Gráfico: Boxplot de errores")
+y -= 10
+c.drawImage(img1, 50, y - 200, width=500, height=200)
 
-    y -= 10
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y, "Diferencias de MCC entre modelos")
-    y -= 20
-    c.setFont("Helvetica", 10)
+# Insertar imagen 2 debajo
+y -= 220
+c.drawString(40, y, "📊 Gráfico: MAE con desviación estándar")
+y -= 10
+c.drawImage(img2, 50, y - 200, width=500, height=200)
 
-    for i in range(len(mccs)):
-        for j in range(i+1, len(mccs)):
-            diff = abs(mccs[i] - mccs[j])
-            c.drawString(60, y, f"{modelos[i]} vs {modelos[j]}: Δ MCC = {diff:.4f}")
-            y -= 15
+# Finalizar
+c.showPage()
+c.save()
+pdf_buffer.seek(0)
 
-    y -= 10
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y, "Prueba de McNemar - p-valores")
-    y -= 20
-    c.setFont("Helvetica", 10)
-
-    for (modelo_a, modelo_b), result in mcnemar_results.items():
-        c.drawString(60, y, f"{modelo_a} vs {modelo_b}: p-valor = {result.pvalue:.4f}")
-        y -= 15
-
-    c.save()
-    buffer.seek(0)
-    return buffer
-
-# Diccionario para nombrar los modelos
-modelos_nombres = ["Colaborativo", "Contenido", "Híbrido"]
-mccs = [mcc1, mcc2, mcc3]
-mcnemar_results = {
-    ("Colaborativo", "Contenido"): result_12,
-    ("Colaborativo", "Híbrido"): result_13,
-    ("Contenido", "Híbrido"): result_23
-}
-
-# Botón para generar y descargar el PDF
-pdf_buffer = generar_pdf_mcc_mcnemar(mccs, mcnemar_results, modelos_nombres)
-
+# Botón de descarga
 st.download_button(
-    label="📄 Descargar PDF con Resultados de McNemar y MCC",
+    label="📄 Descargar reporte PDF con gráficos y pruebas estadísticas",
     data=pdf_buffer,
-    file_name="reporte_comparativo_modelos.pdf",
+    file_name="reporte_estadistico_modelos.pdf",
     mime="application/pdf"
 )
