@@ -6,6 +6,8 @@ from scipy.stats import friedmanchisquare, wilcoxon
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+import random
+random.seed(42)
 np.random.seed(42)
 
 warnings.filterwarnings("ignore")
@@ -17,7 +19,6 @@ df_full = pd.read_csv("valoraciones_cursos.csv")
 
 # Dividir en train/test
 def dividir_train_test(df, test_size=0.2, min_ratings=3):
-    df = df.sort_values(by=['estudiante_id', 'curso_id']).reset_index(drop=True)
     train_list, test_list = [], []
     for user_id, group in df.groupby('estudiante_id'):
         if len(group) >= min_ratings:
