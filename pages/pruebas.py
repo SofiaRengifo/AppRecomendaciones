@@ -15,14 +15,9 @@ st.title("📊 Evaluación Estadística de Modelos de Recomendación")
 # Cargar CSV original
 df_full = pd.read_csv("valoraciones_cursos.csv")
 
-st.write("🔍 Vista previa del archivo cargado:")
-st.write(df_full.head(10))
-st.write("📏 Dimensiones del archivo:")
-st.write(df_full.shape)
-
-
 # Dividir en train/test
 def dividir_train_test(df, test_size=0.2, min_ratings=3):
+    df = df.sort_values(by=['estudiante_id', 'curso_id']).reset_index(drop=True)
     train_list, test_list = [], []
     for user_id, group in df.groupby('estudiante_id'):
         if len(group) >= min_ratings:
