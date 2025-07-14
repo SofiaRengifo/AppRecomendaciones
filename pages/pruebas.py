@@ -6,6 +6,7 @@ from scipy.stats import friedmanchisquare, wilcoxon
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+np.random.seed(42)
 
 warnings.filterwarnings("ignore")
 
