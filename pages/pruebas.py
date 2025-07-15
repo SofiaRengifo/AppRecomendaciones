@@ -16,28 +16,28 @@ st.title("📊 Evaluación Estadística de Modelos de Recomendación")
 
 # Cargar conjuntos fijos para asegurar consistencia entre local y Streamlit Cloud
 # Cargar archivo original para obtener categorías
-df_full = pd.read_csv("valoraciones_cursos.csv")
-
-df_train = pd.read_csv("train_set.csv")
-df_test = pd.read_csv("test_set.csv")
-
-# # Cargar CSV original
 # df_full = pd.read_csv("valoraciones_cursos.csv")
 
-# # Dividir en train/test
-# def dividir_train_test(df, test_size=0.2, min_ratings=3):
-#     train_list, test_list = [], []
-#     for user_id, group in df.groupby('estudiante_id'):
-#         if len(group) >= min_ratings:
-#             test_sample = group.sample(frac=test_size, random_state=42)
-#             train_sample = group.drop(test_sample.index)
-#             test_list.append(test_sample)
-#             train_list.append(train_sample)
-#         else:
-#             train_list.append(group)
-#     return pd.concat(train_list).reset_index(drop=True), pd.concat(test_list).reset_index(drop=True)
+# df_train = pd.read_csv("train_set.csv")
+# df_test = pd.read_csv("test_set.csv")
 
-# df_train, df_test = dividir_train_test(df_full)
+# Cargar CSV original
+df_full = pd.read_csv("valoraciones_cursos.csv")
+
+# Dividir en train/test
+def dividir_train_test(df, test_size=0.2, min_ratings=3):
+    train_list, test_list = [], []
+    for user_id, group in df.groupby('estudiante_id'):
+        if len(group) >= min_ratings:
+            test_sample = group.sample(frac=test_size, random_state=42)
+            train_sample = group.drop(test_sample.index)
+            test_list.append(test_sample)
+            train_list.append(train_sample)
+        else:
+            train_list.append(group)
+    return pd.concat(train_list).reset_index(drop=True), pd.concat(test_list).reset_index(drop=True)
+
+df_train, df_test = dividir_train_test(df_full)
 # # generar csv fijos
 # df_train.to_csv("train_set.csv", index=False)
 # df_test.to_csv("test_set.csv", index=False)
