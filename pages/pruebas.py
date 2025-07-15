@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 import random
+from scipy.stats import shapiro
 random.seed(42)
 np.random.seed(42)
 
@@ -142,6 +143,16 @@ stds = [np.std(e_colab), np.std(e_cont), np.std(e_hibr)]
 ax2.bar(modelos, medias, yerr=stds, capsize=5, color=['skyblue', 'lightgreen', 'salmon'])
 ax2.set_ylabel("MAE")
 st.pyplot(fig2)
+
+# Prueba de normalidad Shapiro-Wilk
+st.subheader("🧪 Prueba de Normalidad (Shapiro-Wilk)")
+stat_c, p_c = shapiro(e_colab)
+stat_t, p_t = shapiro(e_cont)
+stat_h, p_h = shapiro(e_hibr)
+
+st.write(f"🔹 Colaborativo: p = {p_c:.4f}")
+st.write(f"🔹 Contenido: p = {p_t:.4f}")
+st.write(f"🔹 Híbrido: p = {p_h:.4f}")
 
 # Prueba de Friedman
 st.subheader(txt["friedman_test"])
