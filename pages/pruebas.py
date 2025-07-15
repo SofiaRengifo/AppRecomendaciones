@@ -11,8 +11,12 @@ random.seed(42)
 np.random.seed(42)
 
 warnings.filterwarnings("ignore")
+from get_translations import cargar_idioma
 
-st.title("📊 Evaluación Estadística de Modelos de Recomendación")
+idioma = st.sidebar.selectbox("🌐 Idioma / Language / Langue", ["es", "en", "fr"])
+txt = cargar_idioma(idioma)
+
+st.title(txt["evaluation_title"])
 
 # Cargar CSV original
 df_full = pd.read_csv("valoraciones_cursos.csv")
@@ -110,14 +114,14 @@ e_cont = np.array(resultados['Contenido'])
 e_hibr = np.array(resultados['Híbrido'])
 
 # Mostrar MAE
-st.subheader("📉 Error Absoluto Medio (MAE)")
+st.subheader(txt["mae"])
 st.write(f"🔹 Colaborativo: {np.mean(e_colab):.3f} ± {np.std(e_colab):.3f}")
 st.write(f"🔹 Contenido: {np.mean(e_cont):.3f} ± {np.std(e_cont):.3f}")
 st.write(f"🔹 Híbrido: {np.mean(e_hibr):.3f} ± {np.std(e_hibr):.3f}")
 
 
 # Boxplot
-st.subheader("📦 Distribución de errores (Boxplot)")
+st.subheader(txt["Boxplot"])
 df_plot = pd.DataFrame({
     'Colaborativo': e_colab[:500],
     'Contenido': e_cont[:500],
@@ -129,7 +133,7 @@ sns.boxplot(data=df_plot, x="Modelo", y="Error", palette="Set2", ax=ax1)
 st.pyplot(fig1)
 
 # Gráfico de barras
-st.subheader("📊 Comparación de MAE con desviación estándar")
+st.subheader(txt["Comparación"])
 fig2, ax2 = plt.subplots()
 modelos = ['Colaborativo', 'Contenido', 'Híbrido']
 medias = [np.mean(e_colab), np.mean(e_cont), np.mean(e_hibr)]
@@ -140,7 +144,7 @@ ax2.set_ylabel("MAE")
 st.pyplot(fig2)
 
 # Prueba de Friedman
-st.subheader("🧪 Prueba No Paramétrica: Friedman + Wilcoxon")
+st.subheader(txt["friedman_test"])
 n = min(len(e_colab), len(e_cont), len(e_hibr), 500)
 friedman = friedmanchisquare(e_colab[:n], e_cont[:n], e_hibr[:n])
 
@@ -164,9 +168,9 @@ st.markdown("🧠 Bonferroni ajustado: α = 0.05 / 3 ≈ 0.0167")
 
 
 # Conclusión
-st.subheader("✅ Conclusión Final")
+st.subheader(txt["Conclusión"])
 mejor_modelo = modelos[np.argmin(medias)]
-st.success(f"🎯 El modelo con menor MAE es **{mejor_modelo}**. Las pruebas estadísticas indican que hay diferencias significativas entre modelos (Friedman p < 0.05), confirmadas por Wilcoxon con ajuste Bonferroni.")
+st.success(txt["final_conclusion"].format(model=mejor_modelo))
 
 
 import io
@@ -185,15 +189,15 @@ def fig_to_img(fig):
 # Crear gráfico 1: Boxplot
 fig1, ax1 = plt.subplots()
 sns.boxplot(data=df_plot, x="Modelo", y="Error", palette="Set2", ax=ax1)
-ax1.set_title("Boxplot de errores")
+ax1.set_title(txt["boxplot_title"])
 img1 = fig_to_img(fig1)
 plt.close(fig1)
 
 # Crear gráfico 2: MAE + STD
 fig2, ax2 = plt.subplots()
 ax2.bar(modelos, medias, yerr=stds, capsize=5, color=['skyblue', 'lightgreen', 'salmon'])
-ax2.set_title("MAE con desviación estándar")
-ax2.set_ylabel("MAE")
+ax2.set_title(txt["mae_std_title"])
+ax2.set_ylabel(txt["mae_label"])
 img2 = fig_to_img(fig2)
 plt.close(fig2)
 
@@ -205,12 +209,12 @@ y = height - 40
 
 # Título
 c.setFont("Helvetica-Bold", 16)
-c.drawString(40, y, "📊 Reporte de Evaluación de Modelos de Recomendación")
+c.drawString(40, y, txt["pdf_title"])
 y -= 30
 
 # MAE
 c.setFont("Helvetica-Bold", 12)
-c.drawString(40, y, "📉 MAE (Error Absoluto Medio):")
+c.drawString(40, y, txt["pdf_mae_title"])
 y -= 20
 c.setFont("Helvetica", 10)
 c.drawString(60, y, f"🔹 Colaborativo: {np.mean(e_colab):.3f} ± {np.std(e_colab):.3f}")
@@ -222,28 +226,28 @@ y -= 30
 
 # Pruebas estadísticas
 c.setFont("Helvetica-Bold", 12)
-c.drawString(40, y, "🧪 Pruebas estadísticas:")
+c.drawString(40, y, txt["pdf_stats_title"])
 y -= 20
 c.setFont("Helvetica", 10)
-c.drawString(60, y, f"📌 Friedman: estadístico = {friedman.statistic:.4f}, p = {friedman.pvalue:.4g}")
+c.drawString(60, y, txt["pdf_friedman"].format(stat=friedman.statistic, pval=friedman.pvalue))
 y -= 15
-c.drawString(60, y, f"🔹 Wilcoxon Colab vs Contenido: p = {p1:.4f}")
+c.drawString(60, y, txt["pdf_wilcoxon_1"].format(p=p1))
 y -= 15
-c.drawString(60, y, f"🔹 Wilcoxon Colab vs Híbrido: p = {p2:.4f}")
+c.drawString(60, y, txt["pdf_wilcoxon_2"].format(p=p2))
 y -= 15
-c.drawString(60, y, f"🔹 Wilcoxon Contenido vs Híbrido: p = {p3:.4f}")
+c.drawString(60, y, txt["pdf_wilcoxon_3"].format(p=p3))
 y -= 15
-c.drawString(60, y, "🧠 Bonferroni ajustado: α = 0.05 / 3 ≈ 0.0167")
+c.drawString(60, y, txt["pdf_bonferroni"])
 y -= 40
 
 # Insertar imagen 1
-c.drawString(40, y, "📦 Gráfico: Boxplot de errores")
+c.drawString(40, y, txt["img1_label"])
 y -= 10
 c.drawImage(img1, 50, y - 200, width=500, height=200)
 
 # Insertar imagen 2 debajo
 y -= 220
-c.drawString(40, y, "📊 Gráfico: MAE con desviación estándar")
+c.drawString(40, y, txt["img2_label"])
 y -= 10
 c.drawImage(img2, 50, y - 200, width=500, height=200)
 
@@ -254,7 +258,7 @@ pdf_buffer.seek(0)
 
 # Botón de descarga
 st.download_button(
-    label="📄 Descargar reporte PDF con gráficos y pruebas estadísticas",
+    label=txt["download_stats_pdf"],
     data=pdf_buffer,
     file_name="reporte_estadistico_modelos.pdf",
     mime="application/pdf"

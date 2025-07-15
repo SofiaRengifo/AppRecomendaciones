@@ -12,6 +12,11 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import io
 
+from get_translations import cargar_idioma
+
+idioma = st.sidebar.selectbox("🌐 Idioma / Language / Langue", ["es", "en", "fr"])
+txt = cargar_idioma(idioma)
+
 # Cargar CSV
 df_full = pd.read_csv("valoraciones_cursos.csv")
 
@@ -168,10 +173,10 @@ def generar_pdf_recomendaciones(df, estudiante_id):
     return buffer
 
 # --- STREAMLIT ---
-st.title("🎓 Recomendador de Cursos")
+st.title(txt["title_main"])
 
-estudiante = st.selectbox("Selecciona un estudiante", sorted(df_train['estudiante_id'].unique()))
-modelo = st.radio("Modelo de recomendación", ['Híbrido', 'Colaborativo', 'Contenido'])
+estudiante = st.selectbox(txt["select_student"], sorted(df_train['estudiante_id'].unique()))
+modelo = st.radio(txt["recommender_model"], ['Híbrido', 'Colaborativo', 'Contenido'])
 
 if modelo == 'Híbrido':
     alpha = st.slider("Peso del modelo colaborativo (α)", 0.0, 1.0, 0.5)
@@ -189,10 +194,10 @@ st.bar_chart(df_recs.set_index("Curso")["Score"])
 # Botón para descargar recomendaciones como PDF
 pdf_buffer = generar_pdf_recomendaciones(df_recs, estudiante)
 
-st.markdown("📢 _Se ha utilizado el 80% de los datos para entrenamiento y el 20% para test._")
+st.markdown(txt["train_test_notice"])
 
 st.download_button(
-    label="📄 Descargar PDF de Recomendaciones",
+    label=txt["download_pdf"],
     data=pdf_buffer,
     file_name=f"recomendaciones_estudiante_{estudiante}.pdf",
     mime="application/pdf"
