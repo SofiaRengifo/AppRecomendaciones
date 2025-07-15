@@ -14,13 +14,6 @@ warnings.filterwarnings("ignore")
 
 st.title("📊 Evaluación Estadística de Modelos de Recomendación")
 
-# Cargar conjuntos fijos para asegurar consistencia entre local y Streamlit Cloud
-# Cargar archivo original para obtener categorías
-# df_full = pd.read_csv("valoraciones_cursos.csv")
-
-# df_train = pd.read_csv("train_set.csv")
-# df_test = pd.read_csv("test_set.csv")
-
 # Cargar CSV original
 df_full = pd.read_csv("valoraciones_cursos.csv")
 
@@ -38,9 +31,6 @@ def dividir_train_test(df, test_size=0.2, min_ratings=3):
     return pd.concat(train_list).reset_index(drop=True), pd.concat(test_list).reset_index(drop=True)
 
 df_train, df_test = dividir_train_test(df_full)
-# # generar csv fijos
-# df_train.to_csv("train_set.csv", index=False)
-# df_test.to_csv("test_set.csv", index=False)
 
 # Matriz de entrenamiento
 matriz = df_train.pivot_table(index='estudiante_id', columns='curso_id', values='valoracion')
