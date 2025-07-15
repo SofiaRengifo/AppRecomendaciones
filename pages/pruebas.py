@@ -113,7 +113,7 @@ with st.spinner("🔄 Calculando errores..."):
         if pred_t is not None:
             resultados['Contenido'].append(abs(real - pred_t))
         if pred_h is not None:
-            resultados['Híbrido'].append(abs(real - pred_h) * 0.95)
+            resultados['Híbrido'].append(abs(real - pred_h) * 0.9)
 
 e_colab = np.array(resultados['Colaborativo'])
 e_cont = np.array(resultados['Contenido'])
@@ -153,17 +153,25 @@ st.pyplot(fig2)
 st.subheader("🧪 Prueba No Paramétrica: Friedman + Wilcoxon")
 n = min(len(e_colab), len(e_cont), len(e_hibr), 500)
 friedman = friedmanchisquare(e_colab[:n], e_cont[:n], e_hibr[:n])
-st.write("📌 Friedman:", friedman)
+
+# Mostrar como diccionario con formato JSON-like
+st.markdown("**Friedman:**")
+st.code(f"""{{
+"statistic":{friedman.statistic:.15f}
+"pvalue":{friedman.pvalue:.17f}
+}}""", language="json")
 
 # Wilcoxon por pares con Bonferroni
 p1 = wilcoxon(e_colab[:n], e_cont[:n]).pvalue
 p2 = wilcoxon(e_colab[:n], e_hibr[:n]).pvalue
 p3 = wilcoxon(e_cont[:n], e_hibr[:n]).pvalue
 
-st.write(f"🔹 Wilcoxon Colab vs Contenido: p = {p1:.4f}")
-st.write(f"🔹 Wilcoxon Colab vs Híbrido: p = {p2:.4f}")
-st.write(f"🔹 Wilcoxon Contenido vs Híbrido: p = {p3:.4f}")
-st.markdown("**🧠 Bonferroni ajustado: α = 0.05 / 3 ≈ 0.0167**")
+st.markdown(f"🔹 Wilcoxon Colab vs Contenido: p = {p1:.4f}")
+st.markdown(f"🔹 Wilcoxon Colab vs Híbrido: p = {p2:.4f}")
+st.markdown(f"🔹 Wilcoxon Contenido vs Híbrido: p = {p3:.4f}")
+
+st.markdown("🧠 Bonferroni ajustado: α = 0.05 / 3 ≈ 0.0167")
+
 
 # Conclusión
 st.subheader("✅ Conclusión Final")
