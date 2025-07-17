@@ -6,8 +6,8 @@ from scipy.stats import friedmanchisquare, wilcoxon
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+from scipy.stats import kstest, zscore
 import random
-from scipy.stats import shapiro
 random.seed(42)
 np.random.seed(42)
 
@@ -144,11 +144,16 @@ ax2.bar(modelos, medias, yerr=stds, capsize=5, color=['skyblue', 'lightgreen', '
 ax2.set_ylabel("MAE")
 st.pyplot(fig2)
 
-# Prueba de normalidad Shapiro-Wilk
-st.subheader("🧪 Prueba de Normalidad (Shapiro-Wilk)")
-stat_c, p_c = shapiro(e_colab)
-stat_t, p_t = shapiro(e_cont)
-stat_h, p_h = shapiro(e_hibr)
+# Normalizar los errores
+e_colab_z = zscore(e_colab)
+e_cont_z = zscore(e_cont)
+e_hibr_z = zscore(e_hibr)
+
+# Prueba de normalidad Kolmogorov-Smirnov
+st.subheader("🧪 Prueba de Normalidad (Kolmogorov-Smirnov)")
+stat_c, p_c = kstest(e_colab_z, 'norm')
+stat_t, p_t = kstest(e_cont_z, 'norm')
+stat_h, p_h = kstest(e_hibr_z, 'norm')
 
 st.write(f"🔹 Colaborativo: p = {p_c:.4f}")
 st.write(f"🔹 Contenido: p = {p_t:.4f}")
