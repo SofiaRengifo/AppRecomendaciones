@@ -1,7 +1,11 @@
 import streamlit as st
+from surprise import SVD, Dataset, Reader
+from surprise.model_selection import train_test_split
+from surprise import accuracy
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import mean_squared_error
 from scipy.stats import friedmanchisquare, wilcoxon
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -187,6 +191,104 @@ st.markdown("🧠 Bonferroni ajustado: α = 0.05 / 3 ≈ 0.0167")
 st.subheader(txt["Conclusión"])
 mejor_modelo = modelos[np.argmin(medias)]
 st.success(txt["final_conclusion"].format(model=mejor_modelo))
+
+
+
+# Comparación adicional con SVD
+st.subheader("📊 Comparación adicional con modelo SVD (modelo clásico)")
+
+# Calcular RMSE del híbrido
+y_true = []
+y_pred = []
+for _, r in df_test.iterrows():
+    pred = predecir_hibrido(r['estudiante_id'], r['curso_id'])
+    if not np.isnan(pred):
+        y_true.append(r['valoracion'])
+        y_pred.append(pred)
+
+rmse_hibrido = np.sqrt(mean_squared_error(y_true, y_pred))
+
+# Preparar datos para Surprise
+df_surprise = df_full[['estudiante_id', 'curso_id', 'valoracion']]
+reader = Reader(rating_scale=(0, 5))  # Asegúrate de ajustar la escala si es necesario
+data = Dataset.load_from_df(df_surprise, reader)
+
+# Entrenar y evaluar SVD
+trainset_svd, testset_svd = train_test_split(data, test_size=0.2, random_state=42)
+modelo_svd = SVD()
+modelo_svd.fit(trainset_svd)
+predicciones_svd = modelo_svd.test(testset_svd)
+
+# Evaluación
+mae_svd = accuracy.mae(predicciones_svd, verbose=False)
+rmse_svd = accuracy.rmse(predicciones_svd, verbose=False)
+
+st.write(f"🧪 **MAE**")
+st.write(f"🔹 SVD: {mae_svd:.3f}")
+st.write(f"🔹 Híbrido: {np.mean(e_hibr):.3f}")
+
+st.write(f"🧪 **RMSE**")
+st.write(f"🔹 SVD: {rmse_svd:.3f}")
+st.write(f"🔹 Híbrido: {rmse_hibrido:.4f}")
+
+
+# Métrica HR@5
+st.subheader("📌 Métrica HR@5 (Hit Rate)")
+
+def calcular_hr(modelo, df_train, df_test, top_n=5, tipo='svd'):
+    hits = 0
+    total = 0
+    train_users_items = df_train.groupby('estudiante_id')['curso_id'].apply(set).to_dict()
+
+    for _, row in df_test.iterrows():
+        user = row['estudiante_id']
+        item_real = row['curso_id']
+
+        if user not in train_users_items:
+            continue
+
+        # Generar predicciones para todos los cursos no vistos
+        vistos = train_users_items[user]
+        candidatos = df_full[~df_full['curso_id'].isin(vistos)]['curso_id'].unique()
+        
+        predicciones = []
+        for item in candidatos:
+            if tipo == 'svd':
+                pred = modelo.predict(str(user), str(item)).est
+            else:
+                pred = predecir_hibrido(user, item)
+            predicciones.append((item, pred))
+        
+        # Top-N recomendaciones
+        top_recomendados = sorted(predicciones, key=lambda x: x[1], reverse=True)[:top_n]
+        top_ids = [i[0] for i in top_recomendados]
+
+        if item_real in top_ids:
+            hits += 1
+        total += 1
+
+    return hits / total if total > 0 else 0
+
+# Calcular HR@5 para ambos modelos
+with st.spinner("Calculando HR@5..."):
+    hr_svd = calcular_hr(modelo_svd, df_train, df_test, tipo='svd')
+    hr_hibrido = calcular_hr(None, df_train, df_test, tipo='hibrido')
+
+st.write(f"🎯 **HR@5 (SVD):** {hr_svd:.3f}")
+st.write(f"🎯 **HR@5 (Híbrido):** {hr_hibrido:.3f}")
+
+# Gráfico de barras
+fig_hr, ax_hr = plt.subplots()
+modelos_hr = ['SVD', 'Híbrido']
+valores_hr = [hr_svd, hr_hibrido]
+ax_hr.bar(modelos_hr, valores_hr, color=['#4C72B0', '#DD8452'])
+ax_hr.set_ylabel("HR@5")
+ax_hr.set_ylim(0, 1)
+ax_hr.set_title("Hit Rate en Top-5")
+st.pyplot(fig_hr)
+
+
+
 
 
 import io
