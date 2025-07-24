@@ -24,5 +24,6 @@
   "mae_std_title": "MAE with standard deviation",
   "mae_label": "MAE",
   "img1_label": "📦 Chart: Error Boxplot",
-  "img2_label": "📊 Chart: MAE with Standard Deviation"
+  "img2_label": "📊 Chart: MAE with Standard Deviation",
+  "comparacion": "📊 Model Comparison: Hybrid, SVD, and Ensemble (SVD + TF-IDF)"
 }

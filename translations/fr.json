@@ -24,5 +24,6 @@
   "mae_std_title": "MAE avec écart type",
   "mae_label": "MAE",
   "img1_label": "📦 Graphique : Boxplot des erreurs",
-  "img2_label": "📊 Graphique : MAE avec écart type"
+  "img2_label": "📊 Graphique : MAE avec écart type",
+  "comparacion": "📊 Comparaison de modèles : hybride, SVD et ensemble (SVD + TF-IDF)"
 }

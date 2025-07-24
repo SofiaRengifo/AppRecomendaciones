@@ -24,5 +24,6 @@
   "mae_std_title": "MAE con desviación estándar",
   "mae_label": "MAE",
   "img1_label": "📦 Gráfico: Boxplot de errores",
-  "img2_label": "📊 Gráfico: MAE con desviación estándar"
+  "img2_label": "📊 Gráfico: MAE con desviación estándar",
+  "comparacion": "📊 Comparación de modelos: Híbrido, SVD y Ensemble (SVD + TF-IDF)"
 }

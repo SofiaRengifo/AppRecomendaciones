@@ -1,11 +1,12 @@
 import streamlit as st
-from surprise import SVD, Dataset, Reader
+from surprise import SVD, Dataset, Reader, accuracy
 from surprise.model_selection import train_test_split
 from surprise import accuracy
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.metrics import mean_squared_error
+from sklearn.feature_extraction.text import TfidfVectorizer
 from scipy.stats import friedmanchisquare, wilcoxon
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -193,100 +194,129 @@ mejor_modelo = modelos[np.argmin(medias)]
 st.success(txt["final_conclusion"].format(model=mejor_modelo))
 
 
-
-# Comparación adicional con SVD
-st.subheader("📊 Comparación adicional con modelo SVD (modelo clásico)")
-
-# Calcular RMSE del híbrido
-y_true = []
-y_pred = []
-for _, r in df_test.iterrows():
-    pred = predecir_hibrido(r['estudiante_id'], r['curso_id'])
-    if not np.isnan(pred):
-        y_true.append(r['valoracion'])
-        y_pred.append(pred)
-
-rmse_hibrido = np.sqrt(mean_squared_error(y_true, y_pred))
-
 # Preparar datos para Surprise
 df_surprise = df_full[['estudiante_id', 'curso_id', 'valoracion']]
-reader = Reader(rating_scale=(0, 5))  # Asegúrate de ajustar la escala si es necesario
+reader = Reader(rating_scale=(0, 5))
 data = Dataset.load_from_df(df_surprise, reader)
 
 # Entrenar y evaluar SVD
 trainset_svd, testset_svd = train_test_split(data, test_size=0.2, random_state=42)
 modelo_svd = SVD()
 modelo_svd.fit(trainset_svd)
-predicciones_svd = modelo_svd.test(testset_svd)
+st.subheader(txt["comparacion"])
 
-# Evaluación
-mae_svd = accuracy.mae(predicciones_svd, verbose=False)
-rmse_svd = accuracy.rmse(predicciones_svd, verbose=False)
+# TF-IDF: Crear matriz de similitud entre cursos por nombre
+vectorizer = TfidfVectorizer()
+tfidf_matrix = vectorizer.fit_transform(df_full['nombre_curso'].astype(str))
+similitud_tfidf = cosine_similarity(tfidf_matrix)
+# Obtener cursos únicos para mantener consistencia de orden
+cursos_unicos = df_full.drop_duplicates('curso_id')[['curso_id', 'nombre_curso']]
+tfidf_matrix = vectorizer.fit_transform(cursos_unicos['nombre_curso'].astype(str))
+similitud_tfidf = cosine_similarity(tfidf_matrix)
+sim_df_tfidf = pd.DataFrame(similitud_tfidf, index=cursos_unicos['curso_id'], columns=cursos_unicos['curso_id'])
 
-st.write(f"🧪 **MAE**")
-st.write(f"🔹 SVD: {mae_svd:.3f}")
-st.write(f"🔹 Híbrido: {np.mean(e_hibr):.3f}")
+# Función para predecir con TF-IDF
+def predecir_tfidf(est_id, curso_id):
+    vistos = df_train[df_train['estudiante_id'] == est_id]
+    if vistos.empty or curso_id not in sim_df_tfidf.columns:
+        return np.nan
+    numerador = 0
+    denominador = 0
+    for _, row in vistos.iterrows():
+        cid = row['curso_id']
+        if cid in sim_df_tfidf.columns:
+            sim = sim_df_tfidf.at[curso_id, cid]
+            numerador += sim * row['valoracion']
+            denominador += sim
+    return numerador / denominador if denominador != 0 else np.nan
 
-st.write(f"🧪 **RMSE**")
-st.write(f"🔹 SVD: {rmse_svd:.3f}")
-st.write(f"🔹 Híbrido: {rmse_hibrido:.4f}")
+# Función ensemble SVD + TF-IDF
+def predecir_ensemble_svd_tfidf(est_id, curso_id, alpha=0.5):
+    if curso_id not in df_full['curso_id'].values:
+        return np.nan
+    pred_svd = modelo_svd.predict(str(est_id), str(curso_id)).est
+    pred_tfidf = predecir_tfidf(est_id, curso_id)
+    if np.isnan(pred_tfidf): pred_tfidf = 2.5
+    return alpha * pred_svd + (1 - alpha) * pred_tfidf
 
+# Calcular errores para SVD + TFIDF
+y_true, y_hibrido, y_svd, y_ensemble = [], [], [], []
+for _, row in df_test.iterrows():
+    est, cur, real = row['estudiante_id'], row['curso_id'], row['valoracion']
+    pred_h = predecir_hibrido(est, cur)
+    pred_s = modelo_svd.predict(str(est), str(cur)).est
+    pred_e = predecir_ensemble_svd_tfidf(est, cur)
 
-# Métrica HR@5
-st.subheader("📌 Métrica HR@5 (Hit Rate)")
+    if not np.isnan(pred_h) and not np.isnan(pred_e):
+        y_true.append(real)
+        y_hibrido.append(pred_h)
+        y_svd.append(pred_s)
+        y_ensemble.append(pred_e)
 
-def calcular_hr(modelo, df_train, df_test, top_n=5, tipo='svd'):
-    hits = 0
-    total = 0
+mae_h = np.mean(np.abs(np.array(y_true) - np.array(y_hibrido)))
+rmse_h = np.sqrt(mean_squared_error(y_true, y_hibrido))
+mae_s = np.mean(np.abs(np.array(y_true) - np.array(y_svd)))
+rmse_s = np.sqrt(mean_squared_error(y_true, y_svd))
+mae_e = np.mean(np.abs(np.array(y_true) - np.array(y_ensemble)))
+rmse_e = np.sqrt(mean_squared_error(y_true, y_ensemble))
+
+st.write("🧪 **MAE**")
+st.write(f"🔹 Híbrido: {mae_h:.3f}")
+st.write(f"🔹 SVD: {mae_s:.3f}")
+st.write(f"🔹 Ensemble (SVD + TF-IDF): {mae_e:.3f}")
+
+st.write("🧪 **RMSE**")
+st.write(f"🔹 Híbrido: {rmse_h:.3f}")
+st.write(f"🔹 SVD: {rmse_s:.3f}")
+st.write(f"🔹 Ensemble (SVD + TF-IDF): {rmse_e:.3f}")
+
+# Calcular HR@5
+def calcular_hr_general(modelo, tipo='svd', top_n=5):
+    hits, total = 0, 0
     train_users_items = df_train.groupby('estudiante_id')['curso_id'].apply(set).to_dict()
-
+    all_cursos = df_full['curso_id'].unique()
+    
     for _, row in df_test.iterrows():
         user = row['estudiante_id']
         item_real = row['curso_id']
-
         if user not in train_users_items:
             continue
-
-        # Generar predicciones para todos los cursos no vistos
         vistos = train_users_items[user]
-        candidatos = df_full[~df_full['curso_id'].isin(vistos)]['curso_id'].unique()
-        
+        candidatos = [i for i in all_cursos if i not in vistos]
         predicciones = []
         for item in candidatos:
             if tipo == 'svd':
                 pred = modelo.predict(str(user), str(item)).est
+            elif tipo == 'ensemble':
+                pred = predecir_ensemble_svd_tfidf(user, item)
             else:
                 pred = predecir_hibrido(user, item)
             predicciones.append((item, pred))
-        
-        # Top-N recomendaciones
-        top_recomendados = sorted(predicciones, key=lambda x: x[1], reverse=True)[:top_n]
-        top_ids = [i[0] for i in top_recomendados]
-
+        top_ids = [i[0] for i in sorted(predicciones, key=lambda x: x[1], reverse=True)[:top_n]]
         if item_real in top_ids:
             hits += 1
         total += 1
-
     return hits / total if total > 0 else 0
 
-# Calcular HR@5 para ambos modelos
-with st.spinner("Calculando HR@5..."):
-    hr_svd = calcular_hr(modelo_svd, df_train, df_test, tipo='svd')
-    hr_hibrido = calcular_hr(None, df_train, df_test, tipo='hibrido')
+with st.spinner("🔄 Calculando HR@5..."):
+    hr_h = calcular_hr_general(None, tipo='hibrido')
+    hr_s = calcular_hr_general(modelo_svd, tipo='svd')
+    hr_e = calcular_hr_general(None, tipo='ensemble')
 
-st.write(f"🎯 **HR@5 (SVD):** {hr_svd:.3f}")
-st.write(f"🎯 **HR@5 (Híbrido):** {hr_hibrido:.3f}")
+st.write("🎯 **HR@5 (Hit Rate en Top-5)**")
+st.write(f"🔹 Híbrido: {hr_h:.3f}")
+st.write(f"🔹 SVD: {hr_s:.3f}")
+st.write(f"🔹 Ensemble (SVD + TF-IDF): {hr_e:.3f}")
 
-# Gráfico de barras
+# Gráfico de barras HR
 fig_hr, ax_hr = plt.subplots()
-modelos_hr = ['SVD', 'Híbrido']
-valores_hr = [hr_svd, hr_hibrido]
-ax_hr.bar(modelos_hr, valores_hr, color=['#4C72B0', '#DD8452'])
+modelos = ['Híbrido', 'SVD', 'Ensemble']
+valores_hr = [hr_h, hr_s, hr_e]
+ax_hr.bar(modelos, valores_hr, color=['#2ca02c', '#1f77b4', '#ff7f0e'])
 ax_hr.set_ylabel("HR@5")
 ax_hr.set_ylim(0, 1)
-ax_hr.set_title("Hit Rate en Top-5")
+ax_hr.set_title("Comparación de HR@5")
 st.pyplot(fig_hr)
-
 
 
 
