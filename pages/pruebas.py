@@ -239,26 +239,32 @@ def predecir_ensemble_svd_tfidf(est_id, curso_id, alpha=0.5):
     if np.isnan(pred_tfidf): pred_tfidf = 2.5
     return alpha * pred_svd + (1 - alpha) * pred_tfidf
 
-# Calcular errores para SVD + TFIDF
-y_true, y_hibrido, y_svd, y_ensemble = [], [], [], []
+# Calcular errores solo para SVD y Ensemble
+y_true_svd, y_pred_svd = [], []
+y_true_ens, y_pred_ens = [], []
+
 for _, row in df_test.iterrows():
     est, cur, real = row['estudiante_id'], row['curso_id'], row['valoracion']
-    pred_h = predecir_hibrido(est, cur)
+
     pred_s = modelo_svd.predict(str(est), str(cur)).est
     pred_e = predecir_ensemble_svd_tfidf(est, cur)
 
-    if not np.isnan(pred_h) and not np.isnan(pred_e):
-        y_true.append(real)
-        y_hibrido.append(pred_h)
-        y_svd.append(pred_s)
-        y_ensemble.append(pred_e)
+    if not np.isnan(pred_s):
+        y_true_svd.append(real)
+        y_pred_svd.append(pred_s)
+    if not np.isnan(pred_e):
+        y_true_ens.append(real)
+        y_pred_ens.append(pred_e)
 
-mae_h = np.mean(np.abs(np.array(y_true) - np.array(y_hibrido)))
-rmse_h = np.sqrt(mean_squared_error(y_true, y_hibrido))
-mae_s = np.mean(np.abs(np.array(y_true) - np.array(y_svd)))
-rmse_s = np.sqrt(mean_squared_error(y_true, y_svd))
-mae_e = np.mean(np.abs(np.array(y_true) - np.array(y_ensemble)))
-rmse_e = np.sqrt(mean_squared_error(y_true, y_ensemble))
+# Ya tienes e_hibr calculado antes
+mae_h = np.mean(e_hibr)
+rmse_h = np.sqrt(np.mean((e_hibr) ** 2))
+
+mae_s = np.mean(np.abs(np.array(y_true_svd) - np.array(y_pred_svd)))
+rmse_s = np.sqrt(mean_squared_error(y_true_svd, y_pred_svd))
+
+mae_e = np.mean(np.abs(np.array(y_true_ens) - np.array(y_pred_ens)))
+rmse_e = np.sqrt(mean_squared_error(y_true_ens, y_pred_ens))
 
 st.write("🧪 **MAE**")
 st.write(f"🔹 Híbrido: {mae_h:.3f}")
